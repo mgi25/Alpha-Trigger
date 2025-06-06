@@ -1,0 +1,102 @@
+import pandas as pd
+import numpy as np
+import ccxt
+from ta.volatility import AverageTrueRange
+from ta.trend import MACD
+from ta.momentum import RSIIndicator
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+import joblib
+
+
+def fetch_ohlcv(exchange, symbol='BTC/USDT', timeframe='5m', limit=500):
+    """Fetch OHLCV data from Binance using ccxt."""
+    data = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    return pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+
+
+def add_indicators(df):
+    """Add VWAP, ATR, RSI, MACD histogram and other features."""
+    df['typical_price'] = (df['high'] + df['low'] + df['close']) / 3
+    df['vwap'] = (df['typical_price'] * df['volume']).cumsum() / df['volume'].cumsum()
+
+    atr_indicator = AverageTrueRange(df['high'], df['low'], df['close'], window=14)
+    df['atr'] = atr_indicator.average_true_range()
+    df['atr_ma'] = df['atr'].rolling(window=10).mean()
+    df['atr_vs_avg'] = df['atr'] / df['atr_ma']
+
+    rsi_indicator = RSIIndicator(df['close'], window=14)
+    df['rsi'] = rsi_indicator.rsi()
+
+    macd_indicator = MACD(df['close'])
+    df['macd_hist'] = macd_indicator.macd_diff()
+
+    df['vwap_distance'] = df['close'] - df['vwap']
+    df['time_bucket'] = (pd.to_datetime(df['timestamp'], unit='ms').dt.hour // 4)
+    return df.dropna()
+
+
+def label_breakouts(df, tp=0.002, sl=0.001):
+    """Label each row 1 if price hits TP before SL, else 0."""
+    labels = []
+    closes = df['close'].values
+    highs = df['high'].values
+    lows = df['low'].values
+    for i in range(len(df)):
+        entry = closes[i]
+        target_up = entry * (1 + tp)
+        target_down = entry * (1 - sl)
+        outcome = 0
+        for j in range(i + 1, min(i + 3, len(df))):
+            if highs[j] >= target_up:
+                outcome = 1
+                break
+            if lows[j] <= target_down:
+                outcome = 0
+                break
+        labels.append(outcome)
+    df['label'] = labels
+    return df
+
+
+def prepare_features(df):
+    features = df[['close', 'volume', 'atr', 'atr_vs_avg', 'vwap_distance',
+                   'rsi', 'macd_hist', 'time_bucket']]
+    return features, df['label']
+
+
+def train_model(df):
+    X, y = prepare_features(df)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+    accuracy = model.score(X_test, y_test)
+    print(f"Validation accuracy: {accuracy:.2f}")
+    joblib.dump(model, 'alpha_model.joblib')
+    return model
+
+
+def load_model(path='alpha_model.joblib'):
+    return joblib.load(path)
+
+
+def predict_breakout(model, row):
+    features = row[['close', 'volume', 'atr', 'atr_vs_avg', 'vwap_distance',
+                    'rsi', 'macd_hist', 'time_bucket']].values.reshape(1, -1)
+    prob = model.predict_proba(features)[0, 1]
+    return prob
+
+
+def main():
+    exchange = ccxt.binance()
+    df = fetch_ohlcv(exchange)
+    df = add_indicators(df)
+    df = label_breakouts(df)
+    model = train_model(df)
+    last_row = df.iloc[-1]
+    prob = predict_breakout(model, last_row)
+    print(f"Probability of profitable breakout: {prob:.2%}")
+
+
+if __name__ == "__main__":
+    main()
