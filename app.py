@@ -1,5 +1,15 @@
+import os
 import pandas as pd
 import numpy as np
+try:
+    import MetaTrader5 as mt5
+except ImportError:  # library not available on all systems
+    mt5 = None
+
+TIMEFRAME_M5 = mt5.TIMEFRAME_M5 if mt5 else 5
+import pandas as pd
+import numpy as np
+main
 import ccxt
 from ta.volatility import AverageTrueRange
 from ta.trend import MACD
@@ -8,7 +18,35 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 import joblib
 
+PASSWORD = "Mgi@2005"
+SERVER = "Exness-MT5Trial7"
+SYMBOL = "XAUUSDm"
 
+
+def mt5_login(account: int) -> bool:
+    """Initialize connection to MetaTrader 5."""
+    if mt5 is None:
+        raise ImportError("MetaTrader5 package is not installed")
+    if not mt5.initialize(server=SERVER, login=account, password=PASSWORD):
+        raise RuntimeError(f"initialize() failed: {mt5.last_error()}")
+    return True
+
+
+def fetch_ohlcv_mt5(account: int, symbol: str = SYMBOL, timeframe=TIMEFRAME_M5, limit: int = 500):
+    """Fetch OHLCV data from Exness via MetaTrader 5."""
+    mt5_login(account)
+    rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, limit)
+    mt5.shutdown()
+    if rates is None:
+        raise RuntimeError("No rates returned from MT5")
+    df = pd.DataFrame(rates)
+    df['timestamp'] = df['time'] * 1000
+    df.rename(columns={'tick_volume': 'volume'}, inplace=True)
+    return df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+
+
+def fetch_ohlcv(exchange, symbol='BTC/USDT', timeframe='5m', limit=500):
+    """Fetch OHLCV data from Binance using ccxt (fallback)."""
 def fetch_ohlcv(exchange, symbol='BTC/USDT', timeframe='5m', limit=500):
     """Fetch OHLCV data from Binance using ccxt."""
     data = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
@@ -88,6 +126,15 @@ def predict_breakout(model, row):
 
 
 def main():
+
+    account = int(os.environ.get("MT5_LOGIN", "0"))
+    try:
+        df = fetch_ohlcv_mt5(account)
+    except Exception as ex:
+        print(f"MT5 fetch failed: {ex}. Falling back to Binance via ccxt.")
+        exchange = ccxt.binance()
+        df = fetch_ohlcv(exchange)
+
     exchange = ccxt.binance()
     df = fetch_ohlcv(exchange)
     df = add_indicators(df)
