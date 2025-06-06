@@ -7,6 +7,9 @@ except ImportError:  # library not available on all systems
     mt5 = None
 
 TIMEFRAME_M5 = mt5.TIMEFRAME_M5 if mt5 else 5
+import pandas as pd
+import numpy as np
+main
 import ccxt
 from ta.volatility import AverageTrueRange
 from ta.trend import MACD
@@ -14,7 +17,6 @@ from ta.momentum import RSIIndicator
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 import joblib
-
 
 PASSWORD = "Mgi@2005"
 SERVER = "Exness-MT5Trial7"
@@ -45,6 +47,8 @@ def fetch_ohlcv_mt5(account: int, symbol: str = SYMBOL, timeframe=TIMEFRAME_M5, 
 
 def fetch_ohlcv(exchange, symbol='BTC/USDT', timeframe='5m', limit=500):
     """Fetch OHLCV data from Binance using ccxt (fallback)."""
+def fetch_ohlcv(exchange, symbol='BTC/USDT', timeframe='5m', limit=500):
+    """Fetch OHLCV data from Binance using ccxt."""
     data = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
     return pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 
@@ -122,6 +126,7 @@ def predict_breakout(model, row):
 
 
 def main():
+
     account = int(os.environ.get("MT5_LOGIN", "0"))
     try:
         df = fetch_ohlcv_mt5(account)
@@ -129,6 +134,9 @@ def main():
         print(f"MT5 fetch failed: {ex}. Falling back to Binance via ccxt.")
         exchange = ccxt.binance()
         df = fetch_ohlcv(exchange)
+
+    exchange = ccxt.binance()
+    df = fetch_ohlcv(exchange)
     df = add_indicators(df)
     df = label_breakouts(df)
     model = train_model(df)
